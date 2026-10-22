@@ -53,6 +53,24 @@ ERROR_MESSAGE = {
     "https://github.com/receyuki/comfyui-prompt-reader-node#prompt-reader-node",
 }
 
+# .NET-style tokens accepted by %date:...% / %time:...% (e.g. yyyy-MM-dd), longest first
+DATE_FORMAT_TOKENS = (
+    ("yyyy", "%Y"),
+    ("yyy", "%Y"),
+    ("yy", "%y"),
+    ("MMMM", "%B"),
+    ("MMM", "%b"),
+    ("dddd", "%A"),
+    ("ddd", "%a"),
+    ("dd", "%d"),
+    ("HH", "%H"),
+    ("hh", "%I"),
+    ("MM", "%m"),
+    ("mm", "%M"),
+    ("ss", "%S"),
+    ("tt", "%p"),
+)
+
 
 def output_to_terminal(text: str):
     print(f"{RESET+BLUE}" f"[SD Prompt Reader] " f"{CYAN+text+RESET}")
@@ -380,6 +398,10 @@ class SDPromptSaver:
                 ),
                 "save_metadata_file": ("BOOLEAN", {"default": False}),
                 "extra_info": ("STRING", {"default": "", "multiline": True}),
+                # string overrides for samplers/schedulers not in the built-in
+                # combo lists, connectable from custom nodes or typed by hand
+                "sampler_name_str": ("STRING", {"default": "", "multiline": False}),
+                "scheduler_str": ("STRING", {"default": "", "multiline": False}),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
@@ -536,11 +558,14 @@ class SDPromptSaver:
                 f", Hashes: {json.dumps(hashes)}" if (hashes and resource_hash) else ""
             )
 
+            scheduler_setting = f"Scheduler: {scheduler_real}, " if scheduler_real else ""
+
             comment = (
                 f"{positive}\n"
                 f"Negative prompt: {negative}\n"
                 f"Steps: {steps}, "
-                f"Sampler: {sampler_name_real}{''if scheduler_real == 'normal' else '_'+scheduler_real}, "
+                f"Sampler: {sampler_name_real}, "
+                f"{scheduler_setting}"
                 f"CFG scale: {cfg}, "
                 f"Seed: {seed}, "
                 f"Size: {img.width if width==0 else width}x{img.height if height==0 else height}, "
@@ -654,6 +679,22 @@ class SDPromptSaver:
 
     @staticmethod
     def get_path(name, variable_map):
+        # %date:format% / %time:format% override date_format/time_format for one
+        # token only, e.g. filename "anima/%date:yyyy-MM%/Mono_%date:dd%"
+        name = re.sub(
+            r"%date:([^%]+)%",
+            lambda m: SDPromptSaver.get_time(
+                SDPromptSaver.convert_date_format(m.group(1))
+            ),
+            name,
+        )
+        name = re.sub(
+            r"%time:([^%]+)%",
+            lambda m: SDPromptSaver.get_time(
+                SDPromptSaver.convert_date_format(m.group(1))
+            ),
+            name,
+        )
         for variable, value in variable_map.items():
             name = name.replace(variable, str(value))
         return Path(name)
@@ -666,6 +707,12 @@ class SDPromptSaver:
             return time_str
         except:
             return ""
+
+    @staticmethod
+    def convert_date_format(format_str):
+        for token, directive in DATE_FORMAT_TOKENS:
+            format_str = format_str.replace(token, directive)
+        return format_str
 
     @staticmethod
     def get_unique_filename(stem: Path, extension: str, output_folder: Path):
